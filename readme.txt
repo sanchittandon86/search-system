@@ -34,7 +34,7 @@ ARCHITECTURE STYLE
 Modular monolith (NOT microservices). One deployable Node.js service with
 clearly separated modules:
 
-    src/modules/
+    backend/src/modules/
         seller/
         product/
         inventory/
@@ -154,16 +154,25 @@ verified in each phase. All phases (0-7) are complete.
 SETUP INSTRUCTIONS (FINAL - ALL PHASES)
 ================================================================================
 
+PROJECT STRUCTURE
+--------------------
+    backend/    - Node/Express/TypeScript API, mock black boxes, migrations,
+                  tests. Everything below runs with backend/ as the working
+                  directory unless noted otherwise.
+    frontend/   - React/Vite storefront (see "FRONTEND" section below)
+    docs/       - per-phase design/implementation notes (phase0-phase7)
+
 PREREQUISITES
 --------------
-- Node.js 20+ (this repo pins 20.20.2 via .nvmrc - run `nvm use` if you
-  manage Node versions with nvm)
+- Node.js 20+ (backend/.nvmrc pins 20.20.2 - run `nvm use` from backend/ if
+  you manage Node versions with nvm)
 - PostgreSQL 16 running locally, reachable on port 5432
 - Redis running locally, reachable on port 6379 (OPTIONAL - see Phase 6;
   the app runs fine without it, caching is just a soft dependency)
 
 1. INSTALL DEPENDENCIES
 ------------------------
+    cd backend
     nvm use              # if using nvm; otherwise ensure `node -v` is 20+
     npm install
 
@@ -172,12 +181,13 @@ PREREQUISITES
     psql -d postgres -c "CREATE ROLE search_system WITH LOGIN PASSWORD 'search_system';"
     psql -d postgres -c "CREATE DATABASE search_system OWNER search_system;"
 
-   (Alternatively, `docker-compose up -d` starts a matching Postgres
-   container if you prefer Docker over a local install - not required,
-   just an option.)
+   (Alternatively, from backend/, `docker-compose up -d` starts a matching
+   Postgres container if you prefer Docker over a local install - not
+   required, just an option.)
 
 3. CONFIGURE ENVIRONMENT
 --------------------------
+    cd backend              # if not already there
     cp .env.example .env
 
    Default values in .env.example work out of the box against the setup
@@ -199,8 +209,8 @@ PREREQUISITES
     CIRCUIT_BREAKER_FAILURE_THRESHOLD=3
     CIRCUIT_BREAKER_COOLDOWN_MS=10000
 
-4. RUN MIGRATIONS
--------------------
+4. RUN MIGRATIONS (from backend/)
+------------------------------------
     npm run migrate
 
    Applies migrations/001_init.sql (creates users, sellers, products,
@@ -211,8 +221,8 @@ PREREQUISITES
     psql -d search_system -c "INSERT INTO sellers (seller_id, name, status) VALUES ('11111111-1111-1111-1111-111111111111', 'Test Seller', 'ACTIVE');"
     psql -d search_system -c "INSERT INTO users (user_id, name, email) VALUES ('33333333-3333-3333-3333-333333333333', 'Test User', 'testuser@example.com');"
 
-6. START THE SERVICES
-------------------------
+6. START THE SERVICES (from backend/)
+------------------------------------------
    Three independent processes, each in its own terminal (or background
    them individually):
 
@@ -242,16 +252,16 @@ PREREQUISITES
    needed on the backend. See "FRONTEND" section below for what it does
    and its own setup notes.
 
-8. RUN THE TEST SUITE
-------------------------
+8. RUN THE TEST SUITE (from backend/)
+------------------------------------------
     npm test
 
    Runs three scenario tests directly against Postgres (no running app
    or mocks required): inventory concurrency, event idempotency, and
    search fallback. See docs/phase7.md.
 
-9. BUILD FOR PRODUCTION (optional)
---------------------------------------
+9. BUILD FOR PRODUCTION (optional, from backend/)
+------------------------------------------------------
     npm run build     # compiles src/ to dist/
     npm start         # runs dist/index.js
 

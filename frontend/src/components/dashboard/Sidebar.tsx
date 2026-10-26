@@ -1,37 +1,40 @@
-const INERT_NAV_ITEMS = [
-  "Home",
-  "Orders",
-  "Customers",
-  "Content",
-  "Finances",
-  "Analytics",
-  "Marketing",
-  "Discounts",
-];
+import { View } from "../../App";
 
-// Only "Products" is wired to real data (GET/PATCH/POST /sellers/.../products
-// and PATCH /products/.../inventory). The rest of this list exists purely to
-// match the requested dashboard layout - clicking them does nothing, since
-// no backend API exists for orders/customers/analytics/etc. (out of scope,
-// per readme.txt's "WHAT NOT TO BUILD").
-export function Sidebar() {
+export type DashboardSection = "products" | "events";
+
+interface Props {
+  sellerName: string;
+  activeSection: DashboardSection;
+  onSectionChange: (section: DashboardSection) => void;
+  onLogout: () => void;
+  onSwitchView: (view: View) => void;
+}
+
+export function Sidebar({ sellerName, activeSection, onSectionChange, onLogout, onSwitchView }: Props) {
   return (
     <aside className="dash-sidebar">
-      <div className="dash-sidebar__brand">Search System</div>
+      <button className="dash-sidebar__back" onClick={() => onSwitchView("storefront")}>
+        ← Storefront
+      </button>
+      <div className="dash-sidebar__brand">{sellerName}</div>
       <p className="dash-sidebar__section">Main</p>
       <nav>
-        {INERT_NAV_ITEMS.slice(0, 2).map((item) => (
-          <span key={item} className="dash-nav-item dash-nav-item--inert">
-            {item}
-          </span>
-        ))}
-        <span className="dash-nav-item dash-nav-item--active">Products</span>
-        {INERT_NAV_ITEMS.slice(2).map((item) => (
-          <span key={item} className="dash-nav-item dash-nav-item--inert">
-            {item}
-          </span>
-        ))}
+        <button
+          className={`dash-nav-item ${activeSection === "products" ? "dash-nav-item--active" : ""}`}
+          onClick={() => onSectionChange("products")}
+        >
+          Products
+        </button>
+        <button
+          className={`dash-nav-item ${activeSection === "events" ? "dash-nav-item--active" : ""}`}
+          onClick={() => onSectionChange("events")}
+        >
+          User Events
+        </button>
       </nav>
+      <button className="dash-sidebar__logout" onClick={onLogout}>
+        Log out
+      </button>
     </aside>
   );
 }

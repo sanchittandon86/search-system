@@ -22,3 +22,8 @@ export async function findSellerById(sellerId: string): Promise<Seller | null> {
   if (result.rows.length === 0) return null;
   return mapRow(result.rows[0]);
 }
+
+export async function listSellers(): Promise<Seller[]> {
+  const result = await pool.query<SellerRow>(`SELECT * FROM sellers ORDER BY name`);
+  return result.rows.map(mapRow);
+}

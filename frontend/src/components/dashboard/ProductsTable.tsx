@@ -1,4 +1,5 @@
 import { formatPrice } from "../../api";
+import { categoryImageUrl, getCategoryMeta } from "../../categoryMeta";
 import { Product } from "../../types";
 
 function statusFor(product: Product): { label: string; className: string } {
@@ -47,10 +48,14 @@ export function ProductsTable({ products, selectedIds, onToggleSelect, onToggleS
               </td>
               <td>
                 <div className="dash-table__product">
-                  <span className="dash-table__thumb">{product.name.charAt(0)}</span>
+                  <img
+                    className="dash-table__thumb"
+                    src={categoryImageUrl(product.categoryId, 80)}
+                    alt={getCategoryMeta(product.categoryId).label}
+                  />
                   <div>
                     <p className="dash-table__name">{product.name}</p>
-                    <p className="dash-table__subtext">{product.categoryId ? "Categorized" : "Uncategorized"}</p>
+                    <p className="dash-table__subtext">{getCategoryMeta(product.categoryId).label}</p>
                   </div>
                 </div>
               </td>

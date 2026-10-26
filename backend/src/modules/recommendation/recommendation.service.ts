@@ -4,7 +4,7 @@ import * as recommendationClient from "./recommendation.client";
 import * as recommendationRepository from "./recommendation.repository";
 import { RecommendationResponse } from "./recommendation.types";
 
-const RECOMMENDATION_CACHE_TTL_SECONDS = 300;
+const RECOMMENDATION_CACHE_TTL_SECONDS = 30;
 
 async function computeRecommendations(
   userId: string,

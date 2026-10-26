@@ -1,23 +1,33 @@
+import { View } from "../App";
+
 interface Props {
   cartCount: number;
   onCartClick: () => void;
-  onShopClick: () => void;
+  view: View;
+  onSwitchView: (view: View) => void;
 }
 
-export function Header({ cartCount, onCartClick, onShopClick }: Props) {
+export function Header({ cartCount, onCartClick, view, onSwitchView }: Props) {
   return (
     <header className="site-header">
       <div className="site-header__left">
         <span className="site-header__logo">SEARCH SYSTEM</span>
-        <nav className="site-header__nav">
-          <button className="nav-link" onClick={onShopClick}>
-            Shop
-          </button>
-          <span className="nav-link nav-link--static">About</span>
-        </nav>
       </div>
       <div className="site-header__right">
-        <span className="nav-link nav-link--static">Logged in as Test User</span>
+        <div className="view-switcher">
+          <button
+            className={view === "storefront" ? "view-switcher__active" : ""}
+            onClick={() => onSwitchView("storefront")}
+          >
+            Storefront
+          </button>
+          <button
+            className={view === "dashboard" ? "view-switcher__active" : ""}
+            onClick={() => onSwitchView("dashboard")}
+          >
+            Seller Dashboard
+          </button>
+        </div>
         <button className="icon-button" onClick={onCartClick} aria-label="Cart">
           <span>Cart</span>
           {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}

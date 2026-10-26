@@ -118,13 +118,21 @@ Recommendations:
 
 Events:
   POST   /events
+  GET    /events?page=&limit=&eventType=&userId=&productId=
 
 BLACK BOX CONTRACTS (mocked in this project)
 -----------------------------------------------
 Search black box:
   POST /search-engine/search
-  Request:  { query, filters: { category, minPrice, maxPrice }, limit }
+  Request:  { query, filters: { category, minPrice, maxPrice, sellerId }, limit }
   Response: { products: [ { productId, score }, ... ] }
+
+  (sellerId was added to the filters after reseeding to a 50-product,
+  8-seller catalog surfaced a real edge case: a highly selective seller
+  filter could return empty results via the black-box path even with
+  matching inventory, since the black box's unfiltered overfetch sample
+  might not include that seller's products at all. See docs/phase5.md's
+  update note.)
 
 Recommendation black box:
   POST /recommendation-engine/recommend
@@ -162,8 +170,35 @@ PROJECT STRUCTURE
     frontend/   - React/Vite storefront (see "FRONTEND" section below)
     docs/       - per-phase design/implementation notes (phase0-phase7)
 
-PREREQUISITES
---------------
+OPTION A - DOCKER (everything in one command)
+----------------------------------------------------
+    docker compose up
+
+   Brings up Postgres, Redis, the backend API, both mock black boxes, and
+   the frontend - 6 containers total, defined in the root docker-compose.yml.
+   Migrations run automatically (a one-shot `migrate` service that the
+   others wait on). Once everything is healthy:
+     Frontend:  http://localhost:5173
+     Backend:   http://localhost:3100/health
+
+   NOT automatic (deliberately, since both are either destructive or
+   impossible to do generically): seeding the demo catalog and buyer users.
+   Run once after the stack is up:
+     docker compose exec backend npm run seed:demo
+     docker compose exec postgres psql -U search_system -d search_system -c \
+       "INSERT INTO users (user_id, name, email) VALUES ('33333333-3333-3333-3333-333333333333', 'Test User', 'testuser@example.com');"
+
+   `docker compose down` stops everything; add `-v` to also drop the
+   Postgres data volume. See the comment at the top of docker-compose.yml
+   for details on what each service does.
+
+OPTION B - LOCAL (no Docker, steps 1-10 below)
+----------------------------------------------------
+Run everything directly with Node/Postgres/Redis installed locally - more
+steps, but easier to iterate on individual pieces during development.
+
+PREREQUISITES (Option B only)
+---------------------------------
 - Node.js 20+ (backend/.nvmrc pins 20.20.2 - run `nvm use` from backend/ if
   you manage Node versions with nvm)
 - PostgreSQL 16 running locally, reachable on port 5432
@@ -180,10 +215,6 @@ PREREQUISITES
 ------------------------
     psql -d postgres -c "CREATE ROLE search_system WITH LOGIN PASSWORD 'search_system';"
     psql -d postgres -c "CREATE DATABASE search_system OWNER search_system;"
-
-   (Alternatively, from backend/, `docker-compose up -d` starts a matching
-   Postgres container if you prefer Docker over a local install - not
-   required, just an option.)
 
 3. CONFIGURE ENVIRONMENT
 --------------------------
@@ -216,10 +247,12 @@ PREREQUISITES
    Applies migrations/001_init.sql (creates users, sellers, products,
    inventory, user_events with all indexes/constraints). Safe to re-run.
 
-5. SEED TEST DATA (optional, no creation API exists for these)
+5. SEED TEST USERS (no user-creation API exists by design)
 ------------------------------------------------------------------
-    psql -d search_system -c "INSERT INTO sellers (seller_id, name, status) VALUES ('11111111-1111-1111-1111-111111111111', 'Test Seller', 'ACTIVE');"
     psql -d search_system -c "INSERT INTO users (user_id, name, email) VALUES ('33333333-3333-3333-3333-333333333333', 'Test User', 'testuser@example.com');"
+
+   (Optional) additional buyer personas used in some demo scenarios:
+    psql -d search_system -c "INSERT INTO users (user_id, name, email) VALUES ('44444444-4444-4444-4444-444444444444', 'Alice', 'alice@example.com'), ('55555555-5555-5555-5555-555555555555', 'Bob', 'bob@example.com');"
 
 6. START THE SERVICES (from backend/)
 ------------------------------------------
@@ -240,7 +273,26 @@ PREREQUISITES
     curl http://localhost:3100/health
     -> {"status":"ok","db":"connected"}
 
-7. START THE FRONTEND (optional - storefront UI)
+7. SEED THE DEMO CATALOG (from backend/, requires the app running)
+------------------------------------------------------------------------
+    npm run seed:demo
+
+   Replaces any existing sellers/products/inventory with a realistic demo
+   catalog: 8 real-brand sellers (Nike, Adidas, Puma, Apple, Samsung, Sony,
+   Levi's, IKEA) and 50 products spread across them (see
+   backend/scripts/seed-demo-data.ts). Sellers are inserted directly via
+   SQL (no seller-creation API exists by design); products are created
+   through the REAL POST /sellers/{id}/products endpoint, so this also
+   exercises the actual creation flow at scale. Buyer users from step 5
+   are left untouched; old user_events referencing the previous catalog
+   are cleared since they'd otherwise point at deleted products.
+
+   The frontend's seller dashboard (TEST_SELLER_ID in
+   frontend/src/sellerApi.ts) is hardcoded to Nike's seller_id - re-run
+   this script any time you want to reset the catalog back to a clean
+   demo state.
+
+8. START THE FRONTEND (optional - storefront UI)
 ------------------------------------------------------
     cd frontend
     npm install
@@ -252,28 +304,29 @@ PREREQUISITES
    needed on the backend. See "FRONTEND" section below for what it does
    and its own setup notes.
 
-8. RUN THE TEST SUITE (from backend/)
+9. RUN THE TEST SUITE (from backend/)
 ------------------------------------------
     npm test
 
    Runs three scenario tests directly against Postgres (no running app
    or mocks required): inventory concurrency, event idempotency, and
-   search fallback. See docs/phase7.md.
+   search fallback. These seed and clean up their own data, independent
+   of the demo catalog from step 7. See docs/phase7.md.
 
-9. BUILD FOR PRODUCTION (optional, from backend/)
+10. BUILD FOR PRODUCTION (optional, from backend/)
 ------------------------------------------------------
     npm run build     # compiles src/ to dist/
     npm start         # runs dist/index.js
 
 QUICK ENDPOINT WALKTHROUGH
 -----------------------------
-    # Create a product for the seeded test seller
-    curl -X POST http://localhost:3100/sellers/11111111-1111-1111-1111-111111111111/products \
+    # Create a product for Nike (after running npm run seed:demo)
+    curl -X POST http://localhost:3100/sellers/50000000-0000-0000-0000-000000000001/products \
       -H "Content-Type: application/json" \
-      -d '{"name":"Running Shoes","description":"Comfortable running shoes","price":2499,"quantity":10}'
+      -d '{"name":"Nike Zoom Fly 5","description":"Lightweight racing shoe","price":13999,"quantity":10}'
 
     # Search for it
-    curl "http://localhost:3100/products/search?q=running"
+    curl "http://localhost:3100/products/search?q=zoom"
 
     # Fire a view event
     curl -X POST http://localhost:3100/events \
@@ -324,7 +377,7 @@ STOREFRONT (pages/StorefrontPage.tsx)
 
 SELLER DASHBOARD (pages/DashboardPage.tsx)
 ------------------------------------------------
-- Product table for the seeded "Test Seller" (GET /sellers/{id}/products),
+- Product table for the seeded "Nike" seller (GET /sellers/{id}/products),
   with search-by-name/ID and status filter tabs (All/Active/Inactive/Out of
   Stock) applied CLIENT-SIDE over that one already-fetched list - no new
   backend filter/search endpoint was added
@@ -350,20 +403,36 @@ SELLER DASHBOARD (pages/DashboardPage.tsx)
   recommendation" scope
 - "Export" generates a client-side CSV download of the currently filtered
   rows - no backend call at all, so it's not an "extra API" either
-- Sidebar nav (Home/Orders/Customers/Content/Finances/Analytics/Marketing/
-  Discounts) matches the mockup's layout but is INERT outside of
-  "Products" - clicking those items does nothing, since no backend exists
-  for any of them. This is a deliberate visual-only concession to match
-  the requested look without pretending functionality that isn't there.
+- Sidebar nav: "Products" and "User Events" are both functional (User
+  Events added later - see below). Home/Orders/Customers/Content/
+  Finances/Analytics/Marketing/Discounts remain INERT - clicking them
+  does nothing, since no backend exists for any of them. This is a
+  deliberate visual-only concession to match the requested mockup layout
+  without pretending functionality that isn't there.
+
+USER EVENTS VIEW (added after initial dashboard build)
+------------------------------------------------------------
+Originally there was no way to list events - only POST /events existed
+(Phase 3). Added GET /events (backend/src/modules/events/) to support a
+"User Events" dashboard section: paginated, filterable by eventType,
+ordered by timestamp DESC. The dashboard's Events view resolves
+productId to a product name using the already-fetched product list (no
+extra lookup call) and shows userId/eventType/metadata/timestamp
+directly from the row - raw event data, not aggregated. This is the one
+place in the project where a new backend endpoint was added specifically
+to support a dashboard feature, rather than reusing an existing one - it
+follows the exact same REST conventions (controller/service/repository,
+pagination shape) as every other list endpoint.
 
 HOW IT AUTHENTICATES
 ------------------------
 There is no login/signup flow (out of scope, per readme.txt). The storefront
 hardcodes the seeded test user's UUID (frontend/src/api.ts, TEST_USER_ID,
-"Test User") and the dashboard hardcodes the seeded test seller's UUID
-(frontend/src/sellerApi.ts, TEST_SELLER_ID, "Test Seller") - every event/
-request fired by either page uses its respective fixed ID. Seed both first
-(see SETUP step 5) or requests will fail their existence checks.
+"Test User") and the dashboard hardcodes Nike's seller UUID
+(frontend/src/sellerApi.ts, TEST_SELLER_ID) - every event/request fired by
+either page uses its respective fixed ID. Seed the test user (SETUP step 5)
+and the demo catalog (SETUP step 7, `npm run seed:demo`) first, or requests
+will fail their existence checks.
 
 HOW SEARCH/RECOMMENDATION FAILURES SHOW UP IN THE UI
 ---------------------------------------------------------
@@ -394,6 +463,6 @@ FOLDER STRUCTURE
           Cart.tsx
           Recommendations.tsx
           dashboard/
-            Sidebar.tsx, StatCard.tsx, ProductsTable.tsx
+            Sidebar.tsx, StatCard.tsx, ProductsTable.tsx, EventsTable.tsx
             AddProductModal.tsx, EditProductModal.tsx
       vite.config.ts                - dev-server API proxy to port 3100

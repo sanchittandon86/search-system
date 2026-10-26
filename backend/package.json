@@ -14,6 +14,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "migrate": "ts-node scripts/migrate.ts",
+    "seed:demo": "ts-node scripts/seed-demo-data.ts",
     "test": "ts-node tests/inventory-concurrency.test.ts && ts-node tests/events-idempotency.test.ts && ts-node tests/search-fallback.test.ts"
   },
   "dependencies": {

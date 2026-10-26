@@ -1,3 +1,5 @@
+import { HERO_IMAGE } from "../categoryMeta";
+
 interface Props {
   onExplore: () => void;
 }
@@ -12,7 +14,7 @@ export function Hero({ onExplore }: Props) {
           Explore Now
         </button>
       </div>
-      <div className="hero__image" aria-hidden="true" />
+      <img className="hero__image" src={`${HERO_IMAGE}?w=900&h=600&fit=crop&auto=format`} alt="Shopping bags" />
     </section>
   );
 }

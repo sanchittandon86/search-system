@@ -31,6 +31,11 @@ export function parseSearchQuery(raw: Record<string, unknown>): SearchQuery {
     throw new BadRequestError("minPrice must be <= maxPrice");
   }
 
+  const minRating = parseNumber(raw.minRating, "minRating");
+  if (minRating !== undefined && (minRating < 1 || minRating > 5)) {
+    throw new BadRequestError("minRating must be between 1 and 5");
+  }
+
   const sortBy = (raw.sortBy as SortBy) ?? "relevance";
   if (!VALID_SORT_BY.includes(sortBy)) {
     throw new BadRequestError(`sortBy must be one of ${VALID_SORT_BY.join(", ")}`);
@@ -39,12 +44,21 @@ export function parseSearchQuery(raw: Record<string, unknown>): SearchQuery {
   const page = Math.max(1, Number(raw.page) || 1);
   const limit = Math.min(50, Math.max(1, Number(raw.limit) || 20));
 
+  // Multi-select brand filter: sellerId=id1,id2,id3 (comma-separated).
+  const sellerIds = raw.sellerId
+    ? String(raw.sellerId)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : undefined;
+
   return {
     q: raw.q ? String(raw.q).trim() : undefined,
     category: raw.category ? String(raw.category) : undefined,
-    sellerId: raw.sellerId ? String(raw.sellerId) : undefined,
+    sellerIds,
     minPrice,
     maxPrice,
+    minRating,
     isActive: parseBoolean(raw.isActive, "isActive", true),
     sortBy,
     page,
@@ -64,20 +78,25 @@ function applySortOverride(results: SearchResultItem[], sortBy: SortBy): SearchR
 
 async function searchViaBlackBox(query: SearchQuery): Promise<SearchResponse> {
   // Black box only returns a ranked top-K, not arbitrary offset access, so
-  // we overfetch through the requested page and slice locally.
-  const overfetchLimit = query.page * query.limit;
+  // we overfetch through the requested page and slice locally. Floor of 50
+  // (this demo catalog's full size) so business filters the black box
+  // doesn't know about (isActive, minRating) never run out of candidates to
+  // filter from - the same class of bug that sellerId hit before it was
+  // forwarded as a black-box filter (see docs/phase5.md's update note).
+  const overfetchLimit = Math.max(query.page * query.limit, 50);
 
   const blackBoxResult = await searchClient.callSearchEngine(
     query.q,
-    { category: query.category, minPrice: query.minPrice, maxPrice: query.maxPrice },
+    { category: query.category, minPrice: query.minPrice, maxPrice: query.maxPrice, sellerIds: query.sellerIds },
     overfetchLimit
   );
 
   const orderedIds = [...blackBoxResult.products].sort((a, b) => b.score - a.score).map((c) => c.productId);
 
   const hydrated = await searchRepository.hydrateFiltered(orderedIds, {
-    sellerId: query.sellerId,
+    sellerIds: query.sellerIds,
     isActive: query.isActive,
+    minRating: query.minRating,
   });
   const hydratedById = new Map(hydrated.map((p) => [p.productId, p]));
 
@@ -94,7 +113,9 @@ async function searchViaBlackBox(query: SearchQuery): Promise<SearchResponse> {
     page: query.page,
     limit: query.limit,
     // Approximate: the black box's total reflects its own filters only —
-    // it doesn't know about sellerId/isActive filtering applied above.
+    // it doesn't know about isActive/minRating filtering applied above
+    // (sellerIds IS sent to it, but its count may still include inactive
+    // or out-of-stock products from those sellers).
     total: blackBoxResult.total,
   };
 }

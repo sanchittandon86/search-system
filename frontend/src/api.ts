@@ -8,8 +8,10 @@ export const TEST_USER_ID = "33333333-3333-3333-3333-333333333333";
 export interface SearchParams {
   q?: string;
   category?: string;
+  sellerIds?: string[];
   minPrice?: number;
   maxPrice?: number;
+  minRating?: number;
   sortBy?: "relevance" | "price_asc" | "price_desc";
   page?: number;
   limit?: number;
@@ -19,8 +21,10 @@ export async function searchProducts(params: SearchParams): Promise<SearchRespon
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
   if (params.category) qs.set("category", params.category);
+  if (params.sellerIds && params.sellerIds.length > 0) qs.set("sellerId", params.sellerIds.join(","));
   if (params.minPrice !== undefined) qs.set("minPrice", String(params.minPrice));
   if (params.maxPrice !== undefined) qs.set("maxPrice", String(params.maxPrice));
+  if (params.minRating !== undefined) qs.set("minRating", String(params.minRating));
   if (params.sortBy) qs.set("sortBy", params.sortBy);
   qs.set("page", String(params.page ?? 1));
   qs.set("limit", String(params.limit ?? 20));
@@ -33,7 +37,7 @@ export async function searchProducts(params: SearchParams): Promise<SearchRespon
   return res.json();
 }
 
-export async function getRecommendations(userId: string, limit = 5): Promise<RecommendationResponse> {
+export async function getRecommendations(userId: string, limit = 6): Promise<RecommendationResponse> {
   const res = await fetch(`/recommendations?userId=${userId}&limit=${limit}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -70,7 +74,7 @@ export function postEvent(event: EventInput): void {
 }
 
 export function formatPrice(price: number): string {
-  return `₹${price.toFixed(2)}`;
+  return `₹${Math.round(price).toLocaleString("en-IN")}`;
 }
 
 export type { Product };

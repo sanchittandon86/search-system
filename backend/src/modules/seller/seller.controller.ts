@@ -25,3 +25,8 @@ export async function listProducts(req: Request, res: Response) {
   const result = await sellerService.listSellerProducts(sellerId, page, limit);
   res.status(200).json(result);
 }
+
+export async function listSellers(_req: Request, res: Response) {
+  const sellers = await sellerService.listSellers();
+  res.status(200).json({ sellers });
+}

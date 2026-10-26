@@ -1,4 +1,5 @@
 import { formatPrice } from "../api";
+import { categoryImageUrl, getCategoryMeta } from "../categoryMeta";
 import { Product } from "../types";
 
 interface Props {
@@ -12,16 +13,25 @@ interface Props {
 
 export function Recommendations({ products, source, loading, expanded, onView, onViewAll }: Props) {
   return (
-    <aside className="recommendations">
-      <h2>Personalized Recommendations</h2>
-      <p className="recommendations__tagline">
-        {source === "fallback" ? "Trending now (black box unavailable)." : "Based on your browsing."}
-      </p>
+    <section className="recommendations">
+      <div className="recommendations__header">
+        <div>
+          <h2>Personalized Recommendations</h2>
+          <p className="recommendations__tagline">
+            {source === "fallback" ? "Trending now (black box unavailable)." : "Based on your browsing."}
+          </p>
+        </div>
+        {!expanded && (
+          <button className="pill-button" onClick={onViewAll}>
+            View All Recommendations
+          </button>
+        )}
+      </div>
 
       {loading && <p className="recommendations__loading">Loading…</p>}
       {!loading && products.length === 0 && <p className="recommendations__loading">No recommendations yet.</p>}
 
-      <div className="recommendations__list">
+      <div className="recommendations__grid">
         {products.map((product) => (
           <div key={product.productId} className="recommendation-card">
             <button
@@ -29,7 +39,7 @@ export function Recommendations({ products, source, loading, expanded, onView, o
               onClick={() => onView(product)}
               aria-label={`View ${product.name}`}
             >
-              <span>{product.name.charAt(0)}</span>
+              <img src={categoryImageUrl(product.categoryId, 200)} alt={getCategoryMeta(product.categoryId).label} />
             </button>
             <div className="recommendation-card__body">
               <p className="recommendation-card__name">{product.name}</p>
@@ -44,12 +54,6 @@ export function Recommendations({ products, source, loading, expanded, onView, o
           </div>
         ))}
       </div>
-
-      {!expanded && (
-        <button className="pill-button pill-button--block" onClick={onViewAll}>
-          View All Recommendations
-        </button>
-      )}
-    </aside>
+    </section>
   );
 }

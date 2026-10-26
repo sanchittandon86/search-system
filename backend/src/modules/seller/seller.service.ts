@@ -2,6 +2,7 @@ import { BadRequestError, NotFoundError } from "../../errors";
 import * as productRepository from "../product/product.repository";
 import { CreateProductInput, ProductWithInventory, UpdateProductInput, Product } from "../product/product.types";
 import * as sellerRepository from "./seller.repository";
+import { Seller } from "./seller.types";
 
 async function getActiveSellerOrThrow(sellerId: string) {
   const seller = await sellerRepository.findSellerById(sellerId);
@@ -64,4 +65,8 @@ export async function listSellerProducts(
 
   const { products, total } = await productRepository.listProductsBySeller(sellerId, page, limit);
   return { products, page, limit, total };
+}
+
+export async function listSellers(): Promise<Seller[]> {
+  return sellerRepository.listSellers();
 }

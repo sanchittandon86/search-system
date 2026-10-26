@@ -10,6 +10,14 @@ export interface SearchEngineFilters {
   category?: string;
   minPrice?: number;
   maxPrice?: number;
+  // sellerIds is forwarded to the black box as filterable catalog metadata
+  // (a real search engine like OpenSearch would index seller as a facet) -
+  // this was added after a 50-product, 8-seller demo surfaced an edge case:
+  // without it, a highly selective seller filter could return empty
+  // results even with matching inventory, because the black box's
+  // unfiltered candidate sample might not happen to include that seller's
+  // products. We still re-check sellerIds after hydration as a safety net.
+  sellerIds?: string[];
 }
 
 export interface SearchEngineCandidate {

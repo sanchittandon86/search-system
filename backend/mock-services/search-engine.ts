@@ -17,6 +17,7 @@ interface SearchRequestBody {
     category?: string;
     minPrice?: number;
     maxPrice?: number;
+    sellerIds?: string[];
   };
   limit?: number;
 }
@@ -42,6 +43,10 @@ app.post("/search-engine/search", async (req, res) => {
   if (filters.maxPrice !== undefined) {
     whereConditions.push(`price <= $${idx++}`);
     whereValues.push(filters.maxPrice);
+  }
+  if (filters.sellerIds && filters.sellerIds.length > 0) {
+    whereConditions.push(`seller_id = ANY($${idx++}::uuid[])`);
+    whereValues.push(filters.sellerIds);
   }
   if (query) {
     whereConditions.push(`(name ILIKE $${idx} OR description ILIKE $${idx})`);

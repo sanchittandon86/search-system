@@ -4,6 +4,7 @@ import * as sellerController from "./seller.controller";
 
 const router = Router();
 
+router.get("/", asyncHandler(sellerController.listSellers));
 router.post("/:sellerId/products", asyncHandler(sellerController.createProduct));
 router.patch("/:sellerId/products/:productId", asyncHandler(sellerController.updateProduct));
 router.get("/:sellerId/products", asyncHandler(sellerController.listProducts));

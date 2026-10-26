@@ -1,32 +1,45 @@
-import { FormEvent, useState } from "react";
+import { FormEvent } from "react";
 import { SearchParams } from "../api";
 
 interface Props {
+  value: string;
+  onChange: (value: string) => void;
   onSearch: (params: SearchParams) => void;
 }
 
-export function SearchBar({ onSearch }: Props) {
-  const [q, setQ] = useState("");
-  const [sortBy, setSortBy] = useState<SearchParams["sortBy"]>("relevance");
-
+export function SearchBar({ value, onChange, onSearch }: Props) {
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    onSearch({ q: q.trim() || undefined, sortBy });
+    // Relevance (the black box's own ranking) is always the default -
+    // there's no sort override in the UI anymore.
+    onSearch({ q: value.trim() || undefined, sortBy: "relevance" });
+  }
+
+  function handleClear() {
+    onChange("");
+    onSearch({ q: undefined, sortBy: "relevance" });
   }
 
   return (
     <form className="search-bar" onSubmit={handleSubmit}>
-      <input
-        type="text"
-        placeholder="Search products (e.g. running shoes)…"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-      />
-      <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SearchParams["sortBy"])}>
-        <option value="relevance">Relevance</option>
-        <option value="price_asc">Price: Low to High</option>
-        <option value="price_desc">Price: High to Low</option>
-      </select>
+      <div className="search-bar__input-wrap">
+        <input
+          type="text"
+          placeholder="Search products (e.g. running shoes)…"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        {value && (
+          <button
+            type="button"
+            className="search-bar__clear"
+            onClick={handleClear}
+            aria-label="Clear search"
+          >
+            ×
+          </button>
+        )}
+      </div>
       <button type="submit">Search</button>
     </form>
   );

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getRecommendations, postEvent, searchProducts, SearchParams, TEST_USER_ID } from "../api";
+import { View } from "../App";
 import { Cart } from "../components/Cart";
 import { Header } from "../components/Header";
 import { Hero } from "../components/Hero";
@@ -7,12 +8,20 @@ import { ProductCard } from "../components/ProductCard";
 import { ProductDetailModal } from "../components/ProductDetailModal";
 import { Recommendations } from "../components/Recommendations";
 import { SearchBar } from "../components/SearchBar";
+import { FilterValues, SearchFilters } from "../components/SearchFilters";
 import { CartItem, Product } from "../types";
 
-const DEFAULT_RECOMMENDATION_LIMIT = 4;
+const DEFAULT_RECOMMENDATION_LIMIT = 6;
 const EXPANDED_RECOMMENDATION_LIMIT = 20;
+const POPULAR_SEARCHES = ["running shoes", "headphones", "jeans", "table lamp", "backpack"];
 
-export function StorefrontPage() {
+interface Props {
+  view: View;
+  onSwitchView: (view: View) => void;
+}
+
+export function StorefrontPage({ view, onSwitchView }: Props) {
+  const [queryText, setQueryText] = useState("");
   const [results, setResults] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -29,6 +38,9 @@ export function StorefrontPage() {
 
   const [toast, setToast] = useState<string | null>(null);
   const productsRef = useRef<HTMLDivElement>(null);
+
+  const [currentQuery, setCurrentQuery] = useState<string | undefined>(undefined);
+  const [activeFilters, setActiveFilters] = useState<FilterValues>({});
 
   function showToast(message: string) {
     setToast(message);
@@ -72,7 +84,18 @@ export function StorefrontPage() {
     if (params.q) {
       postEvent({ eventType: "SEARCH_PERFORMED", searchQuery: params.q });
     }
-    runSearch(params);
+    setCurrentQuery(params.q);
+    runSearch({ ...params, ...activeFilters });
+  }
+
+  function handlePopularSearch(term: string) {
+    setQueryText(term);
+    handleSearch({ q: term, sortBy: "relevance" });
+  }
+
+  function handleApplyFilters(filters: FilterValues) {
+    setActiveFilters(filters);
+    runSearch({ q: currentQuery, sortBy: "relevance", ...filters });
   }
 
   function handleView(product: Product) {
@@ -127,36 +150,23 @@ export function StorefrontPage() {
 
   return (
     <div className="storefront">
-      <Header cartCount={cartCount} onCartClick={() => setCartOpen(true)} onShopClick={handleExplore} />
+      <Header cartCount={cartCount} onCartClick={() => setCartOpen(true)} view={view} onSwitchView={onSwitchView} />
 
-      <div className="storefront__layout">
-        <main className="storefront__main">
-          <Hero onExplore={handleExplore} />
+      <div className="storefront__container">
+        <Hero onExplore={handleExplore} />
 
-          <div ref={productsRef} className="storefront__search">
-            <SearchBar onSearch={handleSearch} />
-          </div>
+        <div ref={productsRef} className="storefront__search">
+          <SearchBar value={queryText} onChange={setQueryText} onSearch={handleSearch} />
+        </div>
 
-          <h2 className="section-heading">Featured Products</h2>
-          {searchError && <p className="error">{searchError}</p>}
-          {searchLoading && <p>Loading…</p>}
-          {!searchLoading && !searchError && (
-            <>
-              <p className="results-meta">{total} product(s) found</p>
-              <div className="product-grid">
-                {results.map((product) => (
-                  <ProductCard
-                    key={product.productId}
-                    product={product}
-                    onView={handleView}
-                    onAddToCart={handleAddToCart}
-                    onWishlist={handleWishlist}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-        </main>
+        <div className="popular-searches">
+          <span>Popular:</span>
+          {POPULAR_SEARCHES.map((term) => (
+            <button key={term} className="popular-searches__pill" onClick={() => handlePopularSearch(term)}>
+              {term}
+            </button>
+          ))}
+        </div>
 
         <Recommendations
           products={recommendations}
@@ -166,6 +176,32 @@ export function StorefrontPage() {
           onView={handleView}
           onViewAll={handleViewAllRecommendations}
         />
+
+        <div className="storefront__body">
+          <SearchFilters onApply={handleApplyFilters} />
+
+          <main className="storefront__main">
+            <h2 className="section-heading">Featured Products</h2>
+            {searchError && <p className="error">{searchError}</p>}
+            {searchLoading && <p>Loading…</p>}
+            {!searchLoading && !searchError && (
+              <>
+                <p className="results-meta">{total} product(s) found</p>
+                <div className="product-grid">
+                  {results.map((product) => (
+                    <ProductCard
+                      key={product.productId}
+                      product={product}
+                      onView={handleView}
+                      onAddToCart={handleAddToCart}
+                      onWishlist={handleWishlist}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </main>
+        </div>
       </div>
 
       {viewingProduct && (

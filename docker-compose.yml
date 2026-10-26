@@ -1,0 +1,137 @@
+# Brings up the entire system: Postgres, Redis, the backend API, both mock
+# search/recommendation black boxes, and the frontend. Run `docker compose up`
+# from the repo root.
+#
+# NOT included automatically: seeding the demo catalog (50 products across
+# 8 brand sellers) - that's a deliberately separate, destructive step (it
+# wipes existing products/sellers/events). Run it manually after the stack
+# is healthy:
+#   docker compose exec backend npm run seed:demo
+# and seed at least one buyer user directly via psql (see readme.txt step 5):
+#   docker compose exec postgres psql -U search_system -d search_system -c \
+#     "INSERT INTO users (user_id, name, email) VALUES ('33333333-3333-3333-3333-333333333333', 'Test User', 'testuser@example.com');"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: search-system-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: search_system
+      POSTGRES_PASSWORD: search_system
+      POSTGRES_DB: search_system
+    ports:
+      # Host-side 5433 (not 5432) so this doesn't collide with a local
+      # Postgres install - containers still reach each other as "postgres"
+      # on 5432 over Docker's internal network regardless of this mapping.
+      - "5433:5432"
+    volumes:
+      - search_system_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U search_system"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: search-system-redis
+    restart: unless-stopped
+    ports:
+      # Host-side 6380 (not 6379) - same reasoning as postgres above.
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: applies migrations/001_init.sql, then exits. Safe to re-run
+  # (uses IF NOT EXISTS) - backend/mocks wait for this to finish successfully
+  # before starting.
+  migrate:
+    build: ./backend
+    container_name: search-system-migrate
+    command: npm run migrate
+    environment:
+      DATABASE_URL: postgres://search_system:search_system@postgres:5432/search_system
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build: ./backend
+    container_name: search-system-backend
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    environment:
+      PORT: 3100
+      DATABASE_URL: postgres://search_system:search_system@postgres:5432/search_system
+      REDIS_URL: redis://redis:6379
+      RECOMMENDATION_ENGINE_URL: http://mock-recommendation:4001/recommendation-engine/recommend
+      SEARCH_ENGINE_URL: http://mock-search:4002/search-engine/search
+      RECOMMENDATION_TIMEOUT_MS: 400
+      SEARCH_ENGINE_TIMEOUT_MS: 400
+      CIRCUIT_BREAKER_FAILURE_THRESHOLD: 3
+      CIRCUIT_BREAKER_COOLDOWN_MS: 10000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3100/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  mock-recommendation:
+    build: ./backend
+    container_name: search-system-mock-recommendation
+    restart: unless-stopped
+    command: npx ts-node mock-services/recommendation-engine.ts
+    ports:
+      - "4001:4001"
+    environment:
+      DATABASE_URL: postgres://search_system:search_system@postgres:5432/search_system
+      MOCK_RECOMMENDATION_PORT: 4001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  mock-search:
+    build: ./backend
+    container_name: search-system-mock-search
+    restart: unless-stopped
+    command: npx ts-node mock-services/search-engine.ts
+    ports:
+      - "4002:4002"
+    environment:
+      DATABASE_URL: postgres://search_system:search_system@postgres:5432/search_system
+      SEARCH_ENGINE_PORT: 4002
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build: ./frontend
+    container_name: search-system-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      BACKEND_URL: http://backend:3100
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  search_system_pgdata:

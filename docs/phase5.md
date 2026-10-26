@@ -1,5 +1,18 @@
 # Phase 5 — Search Black Box Integration (Mocked)
 
+> **Update (post-Phase-7, demo reseed):** after reseeding the catalog to 50
+> products across 8 real-brand sellers (`backend/scripts/seed-demo-data.ts`),
+> filtering by a highly selective `sellerId` (e.g. a seller with ~8 of 50
+> products) could return an empty result set via the black-box path, even
+> with matching inventory — because `sellerId` wasn't forwarded to the black
+> box, its unfiltered overfetch sample sometimes didn't include that
+> seller's products at all. Fixed by forwarding `sellerId` to the black box
+> as a filter (realistic: a real search engine indexes seller as filterable
+> metadata), while *keeping* the post-hydration `sellerId` check as a
+> defense-in-depth safety net. The "Division of Responsibility" table below
+> is updated to reflect this; everything else in this doc describes the
+> original Phase 5 design and still holds.
+
 ## Goal
 
 Swap the naive Postgres search from Phase 2 for a call to a mocked search
@@ -32,7 +45,7 @@ activation status."* Concretely in this phase:
 |---|---|
 | `q` (text relevance) | Black box |
 | `category`, `minPrice`, `maxPrice` | Sent to black box as filters (it needs these to return a relevant candidate set) |
-| `sellerId` | Applied by us, after hydration — the black box has no concept of seller ownership |
+| `sellerId` | Sent to black box as a filter too (added post-Phase-7, see update note above), AND re-checked after hydration as a safety net |
 | `isActive` | Applied by us, after hydration — the black box doesn't track our activation/inventory state |
 | `sortBy=price_asc/price_desc` | Applied by us, after hydration — overrides the black box's relevance order |
 | `sortBy=relevance` (default) | Black box's score order is preserved |

@@ -1,9 +1,10 @@
-import { Product } from "./types";
+import { EventType, ListEventsResponse, Product } from "./types";
 
-// No seller signup/login exists in this design (out of scope, per readme.txt).
-// The seeded "Test Seller" stands in for "the logged-in seller" throughout
-// this dashboard - see readme.txt's seed step.
-export const TEST_SELLER_ID = "11111111-1111-1111-1111-111111111111";
+export interface Seller {
+  sellerId: string;
+  name: string;
+  status: "ACTIVE" | "SUSPENDED";
+}
 
 export interface SellerProductsResponse {
   products: Product[];
@@ -20,8 +21,14 @@ async function parseOrThrow<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export async function listSellerProducts(page = 1, limit = 50): Promise<SellerProductsResponse> {
-  const res = await fetch(`/sellers/${TEST_SELLER_ID}/products?page=${page}&limit=${limit}`);
+export async function listSellers(): Promise<Seller[]> {
+  const res = await fetch(`/sellers`);
+  const body = await parseOrThrow<{ sellers: Seller[] }>(res);
+  return body.sellers;
+}
+
+export async function listSellerProducts(sellerId: string, page = 1, limit = 50): Promise<SellerProductsResponse> {
+  const res = await fetch(`/sellers/${sellerId}/products?page=${page}&limit=${limit}`);
   return parseOrThrow(res);
 }
 
@@ -33,8 +40,8 @@ export interface CreateProductInput {
   quantity?: number;
 }
 
-export async function createProduct(input: CreateProductInput): Promise<Product> {
-  const res = await fetch(`/sellers/${TEST_SELLER_ID}/products`, {
+export async function createProduct(sellerId: string, input: CreateProductInput): Promise<Product> {
+  const res = await fetch(`/sellers/${sellerId}/products`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -50,8 +57,8 @@ export interface UpdateProductInput {
   isActive?: boolean;
 }
 
-export async function updateProduct(productId: string, input: UpdateProductInput): Promise<Product> {
-  const res = await fetch(`/sellers/${TEST_SELLER_ID}/products/${productId}`, {
+export async function updateProduct(sellerId: string, productId: string, input: UpdateProductInput): Promise<Product> {
+  const res = await fetch(`/sellers/${sellerId}/products/${productId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -65,5 +72,23 @@ export async function setInventoryQuantity(productId: string, quantity: number):
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ quantity }),
   });
+  return parseOrThrow(res);
+}
+
+export interface ListEventsParams {
+  sellerId: string;
+  page?: number;
+  limit?: number;
+  eventType?: EventType;
+}
+
+export async function listEvents(params: ListEventsParams): Promise<ListEventsResponse> {
+  const qs = new URLSearchParams();
+  qs.set("sellerId", params.sellerId);
+  qs.set("page", String(params.page ?? 1));
+  qs.set("limit", String(params.limit ?? 50));
+  if (params.eventType) qs.set("eventType", params.eventType);
+
+  const res = await fetch(`/events?${qs.toString()}`);
   return parseOrThrow(res);
 }

@@ -1,7 +1,10 @@
+import { getCached, setCached } from "../../cache/cache";
 import { BadRequestError } from "../../errors";
 import * as searchClient from "./search.client";
 import * as searchRepository from "./search.repository";
 import { SearchQuery, SearchResponse, SearchResultItem, SortBy } from "./search.types";
+
+const SEARCH_CACHE_TTL_SECONDS = 60;
 
 const VALID_SORT_BY: SortBy[] = ["price_asc", "price_desc", "relevance"];
 
@@ -101,10 +104,24 @@ async function searchViaFallback(query: SearchQuery): Promise<SearchResponse> {
   return { results, page: query.page, limit: query.limit, total };
 }
 
+function buildCacheKey(query: SearchQuery): string {
+  // Built from the parsed/defaulted query (not the raw query string) so
+  // equivalent requests (e.g. omitted vs explicit default limit) share a key.
+  return `search:${JSON.stringify(query)}`;
+}
+
 export async function search(query: SearchQuery): Promise<SearchResponse> {
+  const cacheKey = buildCacheKey(query);
+  const cached = await getCached<SearchResponse>(cacheKey);
+  if (cached) return cached;
+
+  let result: SearchResponse;
   try {
-    return await searchViaBlackBox(query);
+    result = await searchViaBlackBox(query);
   } catch {
-    return await searchViaFallback(query);
+    result = await searchViaFallback(query);
   }
+
+  await setCached(cacheKey, result, SEARCH_CACHE_TTL_SECONDS);
+  return result;
 }

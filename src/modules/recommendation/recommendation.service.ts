@@ -1,9 +1,12 @@
+import { getCached, setCached } from "../../cache/cache";
 import { ProductWithInventory } from "../product/product.types";
 import * as recommendationClient from "./recommendation.client";
 import * as recommendationRepository from "./recommendation.repository";
 import { RecommendationResponse } from "./recommendation.types";
 
-export async function getRecommendations(
+const RECOMMENDATION_CACHE_TTL_SECONDS = 300;
+
+async function computeRecommendations(
   userId: string,
   limit: number
 ): Promise<RecommendationResponse<ProductWithInventory>> {
@@ -30,4 +33,17 @@ export async function getRecommendations(
 
   const trending = await recommendationRepository.getTrendingProducts(limit);
   return { recommendations: trending, source: "fallback" };
+}
+
+export async function getRecommendations(
+  userId: string,
+  limit: number
+): Promise<RecommendationResponse<ProductWithInventory>> {
+  const cacheKey = `recommendations:${userId}:${limit}`;
+  const cached = await getCached<RecommendationResponse<ProductWithInventory>>(cacheKey);
+  if (cached) return cached;
+
+  const result = await computeRecommendations(userId, limit);
+  await setCached(cacheKey, result, RECOMMENDATION_CACHE_TTL_SECONDS);
+  return result;
 }

@@ -5,6 +5,7 @@ import { AppError } from "./errors";
 import sellerRoutes from "./modules/seller/seller.routes";
 import productRoutes from "./modules/product/product.routes";
 import inventoryRoutes from "./modules/inventory/inventory.routes";
+import searchRoutes from "./modules/search/search.routes";
 
 const app = express();
 app.use(express.json());
@@ -19,6 +20,9 @@ app.get("/health", async (_req, res) => {
 });
 
 app.use("/sellers", sellerRoutes);
+// Mounted before productRoutes: GET /:productId in productRoutes would
+// otherwise swallow GET /products/search by matching "search" as a productId.
+app.use("/products", searchRoutes);
 app.use("/products", productRoutes);
 app.use("/products", inventoryRoutes);
 

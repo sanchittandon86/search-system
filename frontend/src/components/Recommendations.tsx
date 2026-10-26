@@ -5,40 +5,51 @@ interface Props {
   products: Product[];
   source: "personalized" | "fallback" | null;
   loading: boolean;
-  onRefresh: () => void;
-  onAddToCart: (product: Product) => void;
+  expanded: boolean;
+  onView: (product: Product) => void;
+  onViewAll: () => void;
 }
 
-export function Recommendations({ products, source, loading, onRefresh, onAddToCart }: Props) {
+export function Recommendations({ products, source, loading, expanded, onView, onViewAll }: Props) {
   return (
-    <section className="recommendations">
-      <div className="recommendations__header">
-        <h2>Recommended for you</h2>
-        {source && (
-          <span className={`badge badge--${source}`}>
-            {source === "personalized" ? "Personalized" : "Fallback (trending)"}
-          </span>
-        )}
-        <button className="link-button" onClick={onRefresh} disabled={loading}>
-          {loading ? "Loading…" : "Refresh"}
-        </button>
-      </div>
-      <p className="recommendations__note">
-        Cached for up to 5 minutes (see docs/phase6.md) — click Refresh if you just added events and don't see
-        changes yet.
+    <aside className="recommendations">
+      <h2>Personalized Recommendations</h2>
+      <p className="recommendations__tagline">
+        {source === "fallback" ? "Trending now (black box unavailable)." : "Based on your browsing."}
       </p>
+
+      {loading && <p className="recommendations__loading">Loading…</p>}
+      {!loading && products.length === 0 && <p className="recommendations__loading">No recommendations yet.</p>}
+
       <div className="recommendations__list">
-        {products.length === 0 && !loading && <p>No recommendations yet.</p>}
         {products.map((product) => (
-          <div key={product.productId} className="recommendation-item">
-            <span>{product.name}</span>
-            <span>{formatPrice(product.price)}</span>
-            <button disabled={product.quantity <= 0} onClick={() => onAddToCart(product)}>
-              Add to Cart
+          <div key={product.productId} className="recommendation-card">
+            <button
+              className="recommendation-card__image"
+              onClick={() => onView(product)}
+              aria-label={`View ${product.name}`}
+            >
+              <span>{product.name.charAt(0)}</span>
             </button>
+            <div className="recommendation-card__body">
+              <p className="recommendation-card__name">{product.name}</p>
+              <p className="recommendation-card__subtitle">{product.quantity > 0 ? "In stock" : "Out of stock"}</p>
+              <div className="recommendation-card__footer">
+                <span className="recommendation-card__price">{formatPrice(product.price)}</span>
+                <button className="link-button" onClick={() => onView(product)}>
+                  View
+                </button>
+              </div>
+            </div>
           </div>
         ))}
       </div>
-    </section>
+
+      {!expanded && (
+        <button className="pill-button pill-button--block" onClick={onViewAll}>
+          View All Recommendations
+        </button>
+      )}
+    </aside>
   );
 }

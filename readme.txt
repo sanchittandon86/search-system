@@ -287,14 +287,20 @@ QUICK ENDPOINT WALKTHROUGH
 FRONTEND
 ================================================================================
 
-A minimal React + Vite + TypeScript storefront in frontend/ - a buyer-facing
-UI built to exercise the backend end-to-end, not a product in its own right
-(the backend/API design is the focus of this project, per readme.txt's
-PURPOSE section). Seller/admin endpoints (product creation, inventory
-management) have no UI - they're exercised via curl/Postman, as shown above.
+A minimal React + Vite + TypeScript app in frontend/ with TWO pages, switched
+client-side (no router library, just a useState view switcher in App.tsx) via
+a small floating control in the bottom-right corner of every page:
 
-WHAT IT DOES
---------------
+  - Storefront  - buyer-facing UI (browse/search, cart, checkout, recommendations)
+  - Seller Dashboard - inventory/product management UI
+
+Neither page is a product in its own right - the backend/API design is the
+focus of this project (per readme.txt's PURPOSE section). Both pages are
+built strictly on top of the existing backend endpoints documented above;
+no new backend routes were added to support either UI.
+
+STOREFRONT (pages/StorefrontPage.tsx)
+------------------------------------------
 - Browse/search products (SearchBar -> GET /products/search), with a
   relevance / price_asc / price_desc sort selector
 - Click a product -> opens a detail modal (fires PRODUCT_CLICKED, then
@@ -306,24 +312,63 @@ WHAT IT DOES
 - Checkout button fires one PURCHASED event per cart line (with quantity in
   metadata) and clears the cart - again, simulated, no real order/payment
   record is created
-- "Recommended for you" panel (GET /recommendations) showing the live
-  personalized/fallback source badge, with its own Add to Cart actions and
-  a Refresh button (recommendations are cached up to 5 minutes server-side
-  - see docs/phase6.md - so Refresh may show identical results within that
-  window; the panel says so explicitly)
+- "Personalized Recommendations" sidebar (GET /recommendations) showing the
+  live personalized/fallback source tagline, with a "View All Recommendations"
+  button that re-calls the same endpoint with a larger limit (20 instead of
+  4) to expand the list in place - no separate endpoint, just a different
+  query param on the existing one
+- Visual layout follows a reference storefront mockup the user supplied
+  (header, hero banner, featured-products grid, recommendations sidebar) -
+  product "images" are CSS placeholder boxes with the product's initial
+  letter, since the Product schema has no image field (out of scope)
+
+SELLER DASHBOARD (pages/DashboardPage.tsx)
+------------------------------------------------
+- Product table for the seeded "Test Seller" (GET /sellers/{id}/products),
+  with search-by-name/ID and status filter tabs (All/Active/Inactive/Out of
+  Stock) applied CLIENT-SIDE over that one already-fetched list - no new
+  backend filter/search endpoint was added
+- Stat cards: Total Products, Active, Out of Stock, Inactive - all computed
+  from the same product list. The reference dashboard mockup the user
+  supplied also showed Total Revenue / Total Orders / Customers and a
+  "Draft" status, none of which this backend has data for (no Orders/
+  Payments/Customers system exists - explicitly out of scope). Rather than
+  fabricate numbers, those cards were replaced with ones backed by real
+  inventory data, and "Draft" was dropped since no such product state
+  exists in the schema (every product is just is_active + quantity)
+- "+ Add product" opens a form that calls the real
+  POST /sellers/{id}/products
+- Each row's "Edit" opens a form that calls PATCH
+  /sellers/{id}/products/{id} (name/description/price/isActive) and, if the
+  stock quantity field changed, also PATCH /products/{id}/inventory
+- Row checkboxes + a bulk-action bar (matching the mockup's "N Selected"
+  pattern) support bulk Activate/Deactivate, implemented as parallel calls
+  to the existing PATCH .../products/{id} endpoint for each selected row.
+  Bulk "Delete" from the mockup was intentionally NOT implemented - there is
+  no delete endpoint in this API (products are deactivated, never deleted,
+  per the design), and adding one would be outside this project's "search +
+  recommendation" scope
+- "Export" generates a client-side CSV download of the currently filtered
+  rows - no backend call at all, so it's not an "extra API" either
+- Sidebar nav (Home/Orders/Customers/Content/Finances/Analytics/Marketing/
+  Discounts) matches the mockup's layout but is INERT outside of
+  "Products" - clicking those items does nothing, since no backend exists
+  for any of them. This is a deliberate visual-only concession to match
+  the requested look without pretending functionality that isn't there.
 
 HOW IT AUTHENTICATES
 ------------------------
-There is no login/signup flow (out of scope, per readme.txt). The frontend
-hardcodes the seeded test user's UUID (frontend/src/api.ts, TEST_USER_ID)
-and labels it "Test User" in the header - every event fired by the UI uses
-this fixed userId. Seed it first (see SETUP step 5) or every POST /events
-call from the UI will fail its userId-exists check (docs/phase3.md).
+There is no login/signup flow (out of scope, per readme.txt). The storefront
+hardcodes the seeded test user's UUID (frontend/src/api.ts, TEST_USER_ID,
+"Test User") and the dashboard hardcodes the seeded test seller's UUID
+(frontend/src/sellerApi.ts, TEST_SELLER_ID, "Test Seller") - every event/
+request fired by either page uses its respective fixed ID. Seed both first
+(see SETUP step 5) or requests will fail their existence checks.
 
 HOW SEARCH/RECOMMENDATION FAILURES SHOW UP IN THE UI
 ---------------------------------------------------------
 Nothing special - that's the point. Kill either mock service
-(dev:mock:search / dev:mock:recommendation) while the frontend is open and
+(dev:mock:search / dev:mock:recommendation) while the storefront is open and
 re-run a search or reload recommendations: the UI keeps working identically,
 just served by the fallback path (naive Postgres search / trending
 products) instead of the black box. This was verified directly: killing
@@ -334,13 +379,21 @@ FOLDER STRUCTURE
 -------------------
     frontend/
       src/
-        api.ts                    - fetch wrappers + fire-and-forget postEvent()
-        types.ts                  - Product/CartItem/EventType shapes
-        App.tsx                   - page state + wiring
+        api.ts                     - buyer-facing fetch wrappers + fire-and-forget postEvent()
+        sellerApi.ts                - seller-facing fetch wrappers (list/create/update product, set inventory)
+        types.ts                    - Product/CartItem/EventType shapes
+        App.tsx                     - view switcher (Storefront <-> Seller Dashboard), no router lib
+        pages/
+          StorefrontPage.tsx
+          DashboardPage.tsx
         components/
+          Header.tsx, Hero.tsx       - storefront chrome
           SearchBar.tsx
           ProductCard.tsx
           ProductDetailModal.tsx
           Cart.tsx
           Recommendations.tsx
-      vite.config.ts               - dev-server API proxy to port 3100
+          dashboard/
+            Sidebar.tsx, StatCard.tsx, ProductsTable.tsx
+            AddProductModal.tsx, EditProductModal.tsx
+      vite.config.ts                - dev-server API proxy to port 3100

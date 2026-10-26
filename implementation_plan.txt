@@ -1,0 +1,213 @@
+================================================================================
+IMPLEMENTATION PLAN - PHASE WISE BUILD ORDER
+================================================================================
+
+Each phase is independently demoable. Do not start a phase until the
+previous one's exit criteria are met. This order is deliberate: naive
+search (Phase 2) becomes the fallback for the black-box search (Phase 5),
+and events (Phase 3) must exist before recommendations (Phase 4) are
+meaningful.
+
+--------------------------------------------------------------------------------
+PHASE 0 - PROJECT SETUP
+--------------------------------------------------------------------------------
+Goal: skeleton running, nothing functional yet.
+
+Tasks:
+- Init Node.js + Express + TypeScript project
+- Folder structure:
+    src/modules/seller/
+    src/modules/product/
+    src/modules/inventory/
+    src/modules/search/
+    src/modules/recommendation/
+    src/modules/events/
+    src/db/ (connection pool, migrations)
+- Run PostgreSQL locally (Docker Compose recommended)
+- Migration tool for schema (node-pg-migrate or plain .sql files)
+- GET /health endpoint
+
+Exit criteria:
+- Server boots, connects to Postgres, /health returns 200.
+
+--------------------------------------------------------------------------------
+PHASE 1 - SELLER, PRODUCT, INVENTORY (CORE CRUD)
+--------------------------------------------------------------------------------
+Goal: the foundational data layer. No search/recommendation yet.
+
+Tasks:
+- Create tables: sellers, products, inventory (see schema in readme.txt)
+- Endpoints:
+    POST  /sellers/{sellerId}/products
+    PATCH /sellers/{sellerId}/products/{productId}
+    GET   /sellers/{sellerId}/products
+    GET   /products/{productId}
+    PATCH /products/{productId}/inventory
+- Validation:
+    - price > 0, name required
+    - productId must belong to sellerId for PATCH (ownership check)
+    - inventory quantity update must use an atomic conditional UPDATE,
+      e.g.:
+        UPDATE inventory
+        SET quantity = quantity - 1, updated_at = now()
+        WHERE product_id = $1 AND quantity >= 1;
+      0 rows affected => reject as insufficient stock
+    - DB-level CHECK (quantity >= 0) as a backstop
+
+Exit criteria:
+- Can create a seller's product via curl/Postman, list it, update it,
+  activate/deactivate it, and adjust inventory without it going negative.
+
+--------------------------------------------------------------------------------
+PHASE 2 - NAIVE SEARCH (NO BLACK BOX YET)
+--------------------------------------------------------------------------------
+Goal: prove the search flow end-to-end using only Postgres. This becomes
+the FALLBACK path once the black box is introduced in Phase 5.
+
+Tasks:
+- GET /products/search?q=&category=&sellerId=&minPrice=&maxPrice=&isActive=&sortBy=&page=&limit=
+- Implementation: Postgres ILIKE or tsvector/to_tsquery on name+description,
+  plus WHERE filters on category_id, seller_id, price range, is_active
+- Pagination (page/limit) and sorting (price_asc/price_desc; relevance =
+  default insertion/created_at order for now)
+
+Exit criteria:
+- Searching "shoes" returns active, in-stock-aware, filtered, paginated
+  results using Postgres only - no external dependency involved yet.
+
+--------------------------------------------------------------------------------
+PHASE 3 - EVENT COLLECTION
+--------------------------------------------------------------------------------
+Goal: start capturing user behavior. Independent of recommendations
+existing yet - this just needs to reliably persist events.
+
+Tasks:
+- Create user_events table
+- POST /events
+    - validate eventType is one of: PRODUCT_VIEWED, PRODUCT_CLICKED,
+      SEARCH_PERFORMED, ADD_TO_CART, REMOVE_FROM_CART, WISHLISTED, PURCHASED
+    - write to DB, return 202 Accepted quickly
+    - client generates event_id (UUID) for idempotency; DB has a UNIQUE
+      constraint on event_id so duplicate POSTs are no-ops
+- Must be non-blocking from the frontend's perspective: a failure here must
+  never fail the user's primary action (view/click/purchase)
+
+Exit criteria:
+- Firing each event type via a test script reliably creates rows; firing
+  the same event_id twice does not create a duplicate row.
+
+--------------------------------------------------------------------------------
+PHASE 4 - RECOMMENDATION BLACK BOX INTEGRATION (MOCKED)
+--------------------------------------------------------------------------------
+Goal: prove the integration contract using a stub instead of real ML.
+
+Tasks:
+- Build a mock service/stub implementing:
+    POST /recommendation-engine/recommend
+    Request:  { userId, limit }
+    Response: { products: [ { productId, score }, ... ] }
+  (can return random or "most recently viewed category" products with
+  fake scores - this simulates "the ML team's API")
+- GET /recommendations?userId=&limit=
+    - calls the stub
+    - hydrates productIds against Product DB
+    - filters out inactive / out-of-stock / nonexistent products
+- Fallback logic: if the stub call fails or times out, return trending
+  products (e.g., top N by recent PURCHASED event count, or newest active
+  products if no purchase data exists yet)
+- Add a short timeout (e.g. 400ms) + at most one retry around the black-box
+  call
+
+Exit criteria:
+- /recommendations returns a valid, filtered product list
+- Killing the mock service still returns a sensible fallback list, not an
+  error
+
+--------------------------------------------------------------------------------
+PHASE 5 - SEARCH BLACK BOX INTEGRATION (MOCKED)
+--------------------------------------------------------------------------------
+Goal: swap naive search internals for the black-box contract, keeping
+Phase 2 as the fallback.
+
+Tasks:
+- Build a mock service implementing:
+    POST /search-engine/search
+    Request:  { query, filters: { category, minPrice, maxPrice }, limit }
+    Response: { products: [ { productId, score }, ... ] }
+  (can internally wrap the Phase 2 query to simulate "the vendor's API")
+- Update Search Service:
+    - call black box first -> get ranked productIds
+    - hydrate from Product DB
+    - filter inactive/out-of-stock
+    - paginate
+- On black-box timeout/failure -> fall back directly to the Phase 2
+  Postgres query
+
+Exit criteria:
+- Search works through the black-box path with correct ranking order
+- Disabling the mock still serves results via the Phase 2 fallback - search
+  is never fully broken
+
+--------------------------------------------------------------------------------
+PHASE 6 - CACHING (OPTIONAL)
+--------------------------------------------------------------------------------
+Goal: only add Redis once you can justify it; demonstrate correct usage,
+not just presence.
+
+Tasks:
+- Add Redis for:
+    - hot/popular search queries (short TTL, e.g. 60s)
+    - per-user recommendation results (TTL of a few minutes)
+- Cache-aside pattern: check Redis -> miss -> call service -> populate cache
+- Do NOT cache product/inventory write-path data (correctness-sensitive)
+
+Exit criteria:
+- Repeated identical search/recommendation calls are measurably faster and
+  hit Redis
+- Redis being unavailable does not break anything - requests bypass to DB
+
+--------------------------------------------------------------------------------
+PHASE 7 - HARDENING
+--------------------------------------------------------------------------------
+Goal: make failure handling real and verifiable, not just described.
+
+Tasks:
+- Explicit timeouts on both black-box HTTP calls (e.g. axios timeout: 400ms)
+- Simple circuit-breaker: after N consecutive black-box failures, skip
+  calling it for a short cooldown window and go straight to fallback
+- Tests:
+    - unit test: concurrent inventory decrement never goes negative
+    - integration test: search falls back correctly when black box is down
+    - integration test: duplicate event_id is a no-op
+
+Exit criteria:
+- Killing either mock black box, disabling Redis, or slowing down Postgres
+  degrades the system gracefully per the Failure Handling table in
+  readme.txt, instead of returning errors to the user
+
+--------------------------------------------------------------------------------
+PHASE 8 - SCALE-OUT (ONLY IF REQUIRED / ASKED)
+--------------------------------------------------------------------------------
+Not part of the initial build. Pursue only if there is evidence of a real
+bottleneck, or if explicitly asked to extend the design:
+
+- Add read replicas / tune connection pooling
+- Swap naive/mocked search for a real OpenSearch/Elasticsearch instance
+  behind the same black-box contract
+- Introduce Kafka between Event API and the recommendation pipeline if
+  write volume genuinely requires it
+- Extract Search and Recommendation modules into separately deployable
+  services
+
+--------------------------------------------------------------------------------
+BUILD SEQUENCE SUMMARY
+--------------------------------------------------------------------------------
+0. Setup            -> repo, DB, skeleton
+1. Product/Seller    -> CRUD + inventory (atomic updates)
+2. Naive Search       -> Postgres-only; becomes the fallback path
+3. Events              -> POST /events, non-blocking, idempotent
+4. Rec black box       -> mocked, with fallback to trending products
+5. Search black box    -> mocked, naive search becomes fallback
+6. Caching              -> optional, Redis for hot paths only
+7. Hardening             -> timeouts, circuit-breaker, tests
+8. Scale-out              -> only if pushed further by requirements

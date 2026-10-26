@@ -1,6 +1,10 @@
 import "dotenv/config";
-import express from "express";
+import express, { NextFunction, Request, Response } from "express";
 import pool from "./db/pool";
+import { AppError } from "./errors";
+import sellerRoutes from "./modules/seller/seller.routes";
+import productRoutes from "./modules/product/product.routes";
+import inventoryRoutes from "./modules/inventory/inventory.routes";
 
 const app = express();
 app.use(express.json());
@@ -12,6 +16,23 @@ app.get("/health", async (_req, res) => {
   } catch (err) {
     res.status(500).json({ status: "error", db: "unreachable" });
   }
+});
+
+app.use("/sellers", sellerRoutes);
+app.use("/products", productRoutes);
+app.use("/products", inventoryRoutes);
+
+app.use((req, res) => {
+  res.status(404).json({ error: "route not found" });
+});
+
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof AppError) {
+    res.status(err.statusCode).json({ error: err.message });
+    return;
+  }
+  console.error(err);
+  res.status(500).json({ error: "internal server error" });
 });
 
 const port = Number(process.env.PORT) || 3000;

@@ -1,0 +1,327 @@
+================================================================================
+SEARCH & RECOMMENDATION SYSTEM - LIVE TESTING LOG
+================================================================================
+
+This is a live test session run against the actual running stack (backend +
+both mock black boxes + Redis + Postgres), not a description of expected
+behavior. Every request/response below is real output captured during this
+session on 2026-10-26.
+
+Services running during this session:
+  backend             http://localhost:3100
+  mock search engine  http://localhost:4002/search-engine/search
+  mock rec engine     http://localhost:4001/recommendation-engine/recommend
+  Redis               localhost:6379
+  PostgreSQL          localhost:5432 / search_system
+
+================================================================================
+1. SEED DATA USED FOR THIS SESSION
+================================================================================
+
+USERS
+-------
+  33333333-3333-3333-3333-333333333333   Test User   (pre-existing, has a
+                                                        long purchase history
+                                                        on Running Shoes from
+                                                        earlier phase testing)
+  44444444-4444-4444-4444-444444444444   Alice        (new - Electronics shopper)
+  55555555-5555-5555-5555-555555555555   Bob          (new - Books shopper)
+
+SELLERS
+---------
+  11111111-1111-1111-1111-111111111111   Test Seller
+
+PRODUCTS (created via the real seller API, POST /sellers/{id}/products -
+not inserted directly via SQL, to exercise the actual creation flow)
+-----------------------------------------------------------------------
+  Category: Electronics (cccccccc-cccc-cccc-cccc-cccccccccccc)
+    Wireless Headphones   Rs 4999.00   qty 15
+    Bluetooth Speaker     Rs 2999.00   qty 20
+    Smart Watch           Rs 7999.00   qty 8
+
+  Category: Books (dddddddd-dddd-dddd-dddd-dddddddddddd)
+    The Pragmatic Programmer   Rs 899.00   qty 25
+    Clean Code                 Rs 799.00   qty 30
+
+  Pre-existing (from earlier phase testing, categories "Shoes"/"Bags"):
+    Running Shoes (active, in stock)        Rs 2499.00
+    Running Shoes (active, OUT OF STOCK)    Rs 2499.00   <- leftover from
+                                                              Phase 1's
+                                                              inventory
+                                                              concurrency
+                                                              testing;
+                                                              quantity = 0
+    Comfortable Sandals                     Rs  999.00
+    Leather Wallet                          Rs 1500.00
+    Travel Backpack                         Rs 3500.00
+
+  Total: 10 products (9 purchasable, 1 correctly excluded from search/
+  recommendations for being out of stock - see Test S5 below)
+
+EVENTS FIRED FOR THIS SESSION
+---------------------------------
+  Alice:  SEARCH_PERFORMED("headphones") -> PRODUCT_VIEWED(Headphones) ->
+          ADD_TO_CART(Headphones) -> PURCHASED(Headphones) ->
+          PRODUCT_VIEWED(Speaker) -> PURCHASED(Speaker) ->
+          WISHLISTED(Smart Watch)
+
+  Bob:    SEARCH_PERFORMED("clean code") -> PRODUCT_VIEWED(Clean Code) ->
+          PURCHASED(Clean Code) -> PRODUCT_VIEWED(Pragmatic Programmer) ->
+          PURCHASED(Pragmatic Programmer)
+
+  (Test User already had 7 PURCHASED events on Running Shoes and 2 on
+  Travel Backpack from earlier phase testing - left in place to show how
+  purchase history accumulates and drives the trending fallback.)
+
+Purchase counts in the DB at test time:
+    Running Shoes             7
+    Travel Backpack           2
+    Leather Wallet            1
+    Wireless Headphones       1
+    Clean Code                1
+    Comfortable Sandals       1
+    Bluetooth Speaker         1
+    The Pragmatic Programmer  1
+
+================================================================================
+2. HOW SEARCH WORKS - LIVE TESTS
+================================================================================
+
+Recall the flow (docs/phase5.md): the Search Service calls the search
+black box first; the black box returns ranked {productId, score} pairs
+(including, in this mock, one deliberately injected FAKE/invalid product
+ID with the top score, to prove we never trust it blindly); we hydrate
+those IDs against the real Product DB, filter out inactive/out-of-stock/
+unknown products, apply business filters (sellerId, isActive) the black
+box doesn't know about, optionally re-sort by price, and return the page.
+
+--------------------------------------------------------------------------------
+TEST S1 - Text search: GET /products/search?q=headphones
+--------------------------------------------------------------------------------
+Request:  GET /products/search?q=headphones
+
+Response:
+{
+  "results": [
+    {
+      "name": "Wireless Headphones",
+      "price": 4999,
+      "quantity": 15,
+      "isActive": true
+    }
+  ],
+  "page": 1,
+  "limit": 20,
+  "total": 1
+}
+
+Result: PASS - exact single match on name.
+
+--------------------------------------------------------------------------------
+TEST S2 - Text search: GET /products/search?q=code
+--------------------------------------------------------------------------------
+Matched: "Clean Code" only (total: 1).
+
+Note: "The Pragmatic Programmer" was NOT matched - "code" doesn't appear
+in its name or description. This shows the matching is real text search
+against name/description, not a fuzzy "related topic" match (that kind of
+semantic matching is explicitly out of scope - it's exactly the kind of
+thing the real black box, not our code, would be responsible for).
+
+--------------------------------------------------------------------------------
+TEST S3 - Category filter: GET /products/search?category=<Electronics>
+--------------------------------------------------------------------------------
+Matched (total: 3), in black-box relevance order:
+    Smart Watch            Rs 7999
+    Bluetooth Speaker      Rs 2999
+    Wireless Headphones    Rs 4999
+
+Result: PASS - all 3 Electronics products returned, no Books/Shoes leaked in.
+
+--------------------------------------------------------------------------------
+TEST S4 - Price range: GET /products/search?minPrice=1000&maxPrice=5000
+--------------------------------------------------------------------------------
+Matched (total: 6, 5 results returned):
+    Bluetooth Speaker    Rs 2999
+    Wireless Headphones  Rs 4999
+    Travel Backpack      Rs 3500
+    Leather Wallet       Rs 1500
+    Running Shoes        Rs 2499
+
+Result: PASS - "Comfortable Sandals" (Rs 999) and "Smart Watch" (Rs 7999)
+correctly excluded for being outside the range, "Clean Code"/"Pragmatic
+Programmer" (Rs 799/899) also correctly excluded. The total:6 vs 5
+results is the same out-of-stock case as Test S5: both Running Shoes
+products (Rs 2499 each) fall in this price range, but the black box's
+"total" count has no concept of inventory, so it counts both while the
+hydration step drops the zero-stock one - exactly the documented
+"total is approximate through the black-box path" tradeoff
+(docs/phase5.md).
+
+--------------------------------------------------------------------------------
+TEST S5 - Full catalog, sorted ascending: GET /products/search?sortBy=price_asc&limit=20
+--------------------------------------------------------------------------------
+Response: total: 10, results: 9 entries returned:
+    Clean Code                 Rs 799
+    The Pragmatic Programmer   Rs 899
+    Comfortable Sandals        Rs 999
+    Leather Wallet             Rs 1500
+    Running Shoes              Rs 2499
+    Bluetooth Speaker          Rs 2999
+    Travel Backpack            Rs 3500
+    Wireless Headphones        Rs 4999
+    Smart Watch                Rs 7999
+
+Result: PASS, with an interesting and CORRECT discrepancy: total says 10
+(there are 10 active products in the DB) but only 9 are returned. The
+missing one is the leftover "Running Shoes" with quantity=0 from Phase 1
+inventory testing - it is active (is_active=true) but out of stock, and
+the design explicitly filters out-of-stock products from search results
+even when they're still "active." This is the inventory-aware filtering
+working exactly as designed (docs/phase5.md: "filter out inactive /
+out-of-stock / unknown product IDs").
+
+--------------------------------------------------------------------------------
+TEST S6 - Search black box DOWN (fallback test)
+--------------------------------------------------------------------------------
+Action: killed the mock search-engine process entirely.
+Request: GET /products/search?category=<Electronics>  (same as Test S3)
+
+Response: total: 3, same 3 Electronics products returned - HTTP 200, no
+error surfaced to the caller.
+
+Result: PASS - search fell back transparently to the Phase 2 naive
+Postgres implementation. The user-facing behavior is indistinguishable
+from the black-box-up case for this query (ordering may differ slightly
+since the fallback has no relevance scoring, only recency).
+
+(Mock restarted after this test.)
+
+================================================================================
+3. HOW RECOMMENDATIONS WORK - LIVE TESTS
+================================================================================
+
+Recall the flow (docs/phase4.md): the Recommendation Service calls the
+black box with {userId, limit}; the mock returns {productId, score} pairs
+for a RANDOM sample of products (again, with one injected invalid product
+ID at the top score) - this mock does NOT do real personalization, since
+implementing actual ML/personalization logic is explicitly out of scope
+for this project (see readme.txt's "WHAT NOT TO BUILD"). What IS real and
+tested here: the integration contract, the hydration/filtering of
+whatever the black box returns, and the fallback-to-trending behavior
+when the black box is unavailable.
+
+--------------------------------------------------------------------------------
+TEST R1/R2/R3 - Personalized recommendations (black box UP)
+--------------------------------------------------------------------------------
+GET /recommendations?userId=<Alice>&limit=5
+  source: "personalized"
+  Clean Code, The Pragmatic Programmer, Bluetooth Speaker, Travel Backpack
+
+GET /recommendations?userId=<Bob>&limit=5
+  source: "personalized"
+  Leather Wallet, Bluetooth Speaker, Smart Watch, Running Shoes
+
+GET /recommendations?userId=<Test User>&limit=5
+  source: "personalized"
+  Clean Code, Comfortable Sandals, Smart Watch, The Pragmatic Programmer
+
+Result: PASS, with an honest caveat: because the mock black box picks a
+RANDOM sample rather than genuinely reasoning about each user's history,
+these three lists are not meaningfully different from each other despite
+Alice/Bob/Test User having very different purchase histories. This is
+EXPECTED and correct given the project's explicit scope: "we do NOT
+implement any ML model... Our application should NOT know how the
+recommendation algorithm works" (readme.txt). What's actually being
+verified here is the CONTRACT and plumbing: the call succeeds, returns
+"source": "personalized", and every returned product is a real, active,
+in-stock product - not whether the picks are smart.
+
+The mock ALWAYS injects one hardcoded invalid productId
+(00000000-0000-0000-0000-000000000000, score 0.99 - always the top
+score) into every raw response it returns, by design (see
+docs/phase4.md). Across all three final API responses (R1/R2/R3) above,
+that invalid ID never appeared - confirmed filtered out by hydration
+every time, despite always being the highest-scored "pick."
+
+Note on reproducing this exactly: the mock recommendation engine picks
+its candidate sample via `ORDER BY random()`, so every call returns a
+different random set - the raw example below is a separately captured
+call (not the literal input to R1/R2/R3 above), shown purely to
+illustrate what hydration/filtering strips out before a response ever
+reaches the client:
+
+  Raw black box response (POST /recommendation-engine/recommend, one
+  independent sample call, 6 candidates unfiltered):
+    00000000-... (score 0.99) <- fake/invalid, injected by the mock
+    07c9b72d-... Clean Code                   (score 1.0)
+    0841ce85-... Running Shoes [OUT OF STOCK] (score 0.95)
+    43800295-... Comfortable Sandals          (score 0.9)
+    ae7d90a1-... Leather Wallet               (score 0.85)
+    577175c3-... Smart Watch                  (score 0.8)
+
+  If this exact candidate set were hydrated, the invalid ID and the
+  out-of-stock "Running Shoes" would both be dropped, leaving: Clean
+  Code, Comfortable Sandals, Leather Wallet, Smart Watch - 4 usable
+  products out of 6 raw candidates. The three REAL API responses in
+  R1/R2/R3 above each went through this identical hydration/filtering
+  step against their own (different) random samples, which is why
+  their invalid-ID/out-of-stock counts vary per call.
+
+--------------------------------------------------------------------------------
+TEST R4 - Recommendation black box DOWN (fallback to trending)
+--------------------------------------------------------------------------------
+Action: killed the mock recommendation-engine process entirely.
+Request: GET /recommendations?userId=<Alice>&limit=5
+
+Response: source: "fallback"
+    Running Shoes, Travel Backpack, Comfortable Sandals,
+    The Pragmatic Programmer, Leather Wallet
+
+Result: PASS - this is a dramatically more honest list than the
+"personalized" ones above, and it's driven entirely by real data: the
+top two (Running Shoes, Travel Backpack) are EXACTLY the two products
+with purchase counts above 1 (7 and 2 respectively, from the purchase
+count table in section 1) - the trending-by-purchase-count fallback
+query (docs/phase4.md) is working correctly, not just returning random
+or newest products.
+
+--------------------------------------------------------------------------------
+TEST R5 - Recommendation black box restarted (and the Redis cache catch)
+--------------------------------------------------------------------------------
+Action: restarted the mock, immediately re-ran the same request for Alice.
+
+First attempt: source still came back "fallback" - NOT a bug. The
+recommendation result from Test R4 had already been cached in Redis for
+300 seconds (docs/phase6.md), keyed by userId+limit, and this request hit
+that cache - so it correctly returned the exact same cached response
+rather than making a new black-box call.
+
+After manually clearing that one cache key (redis-cli DEL
+"recommendations:<Alice>:5") and re-requesting: source: "personalized" -
+confirming the black box was genuinely back up and the caching layer
+behaves exactly as designed (cache-aside, 5-minute TTL, doesn't magically
+know the black box recovered mid-TTL-window).
+
+================================================================================
+4. SUMMARY
+================================================================================
+
+  Test   What it proves                                          Result
+  ----   -------------------------------------------------------- ------
+  S1     Exact text match on name                                 PASS
+  S2     Real text search, not fuzzy/semantic matching             PASS
+  S3     Category filter                                           PASS
+  S4     Price range filter                                        PASS
+  S5     Out-of-stock products excluded even if active              PASS
+  S6     Search black box down -> naive Postgres fallback           PASS
+  R1-R3  Recommendation contract + hydration/filtering works        PASS
+  R4     Black box down -> trending-by-purchase-count fallback      PASS
+  R5     Redis cache-aside behaves correctly across black box       PASS
+         recovery (does not "auto-refresh" mid-TTL)
+
+Every failure-handling principle from readme.txt was exercised directly,
+not just asserted: search black box down -> Postgres fallback (S6);
+recommendation black box down -> trending fallback (R4); and the
+caching layer's real TTL behavior, including its one counterintuitive
+but correct consequence (R5), was observed rather than assumed.

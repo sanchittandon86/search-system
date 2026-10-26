@@ -1,0 +1,167 @@
+================================================================================
+PROJECT SETUP - E-COMMERCE SEARCH & RECOMMENDATION SYSTEM
+================================================================================
+
+This file is a standalone, practical setup guide: clone the repo, follow this,
+and have the full system running. For the "why" behind the architecture
+(black-box search/recommendation, modular monolith, what's deliberately out of
+scope), see readme.txt.
+
+Two ways to run it. Pick one.
+
+================================================================================
+OPTION A - DOCKER (recommended, one command)
+================================================================================
+
+PREREQUISITES
+--------------
+- Docker Desktop (or Docker Engine + Compose v2) installed and running
+
+STEPS
+-----
+1. From the repo root:
+       docker compose up --build
+
+   This builds and starts 6 containers: Postgres, Redis, the backend API,
+   both mock search/recommendation black boxes, and the frontend. A one-shot
+   `migrate` service applies the DB schema automatically before anything else
+   starts - no manual migration step needed.
+
+2. Wait for all services to report healthy:
+       docker compose ps
+
+3. Seed demo data (not automatic - it's destructive, so it's a deliberate
+   manual step). In a new terminal:
+       docker compose exec backend npm run seed:demo
+
+   This creates 8 real-brand sellers (Nike, Adidas, Puma, Apple, Samsung,
+   Sony, Levi's, IKEA) and 50 products across them, and wipes any prior
+   demo catalog/events first.
+
+4. Seed at least one buyer user (no user-signup API exists by design):
+       docker compose exec postgres psql -U search_system -d search_system -c \
+         "INSERT INTO users (user_id, name, email) VALUES ('33333333-3333-3333-3333-333333333333', 'Test User', 'testuser@example.com');"
+
+5. Open the app:
+       Storefront:  http://localhost:5173
+       Backend API: http://localhost:3100/health
+
+STOPPING
+--------
+    docker compose down         # stop everything, keep data
+    docker compose down -v      # stop everything AND wipe the Postgres volume
+
+NOTES
+-----
+- Postgres/Redis are exposed on host ports 5433/6380 (not the usual
+  5432/6379), to avoid clashing with any Postgres/Redis already running on
+  your machine. Containers still talk to each other on the standard ports
+  internally - this only affects connecting from your host shell.
+- See the comments at the top of docker-compose.yml for what each service
+  does and how they depend on each other.
+
+================================================================================
+OPTION B - LOCAL (no Docker)
+================================================================================
+
+PREREQUISITES
+--------------
+- Node.js 20+ (backend/.nvmrc pins 20.20.2 - run `nvm use` from backend/ if
+  you use nvm)
+- PostgreSQL 16 running locally, reachable on port 5432
+- Redis running locally, reachable on port 6379 (OPTIONAL - the app runs
+  fine without it; caching is a soft dependency, bypassed if unreachable)
+
+STEPS
+-----
+1. Install backend dependencies:
+       cd backend
+       nvm use              # if using nvm
+       npm install
+
+2. Create the database:
+       psql -d postgres -c "CREATE ROLE search_system WITH LOGIN PASSWORD 'search_system';"
+       psql -d postgres -c "CREATE DATABASE search_system OWNER search_system;"
+
+3. Configure environment:
+       cp .env.example .env
+
+   Defaults in .env.example already match the setup above (DB on
+   localhost:5432, mocks on 4001/4002, Redis on localhost:6379).
+
+4. Run migrations:
+       npm run migrate
+
+5. Seed a buyer user:
+       psql -d search_system -c "INSERT INTO users (user_id, name, email) VALUES ('33333333-3333-3333-3333-333333333333', 'Test User', 'testuser@example.com');"
+
+6. Start the backend + both mock black boxes (3 separate terminals, from
+   backend/):
+       npm run dev                        # main app        -> :3100
+       npm run dev:mock:recommendation    # recommendation mock -> :4001
+       npm run dev:mock:search            # search mock         -> :4002
+
+   The app works even with the mocks stopped - it falls back to naive
+   Postgres search / trending-product recommendations automatically.
+
+   Verify: curl http://localhost:3100/health
+           -> {"status":"ok","db":"connected"}
+
+7. Seed the demo catalog (from backend/, app must be running):
+       npm run seed:demo
+
+   8 brand sellers + 50 products. Safe to re-run any time to reset to a
+   clean demo state (wipes prior demo products/events, keeps buyer users).
+
+8. Start the frontend:
+       cd frontend
+       npm install
+       npm run dev                        # -> :5173
+
+   Open http://localhost:5173. Vite's dev server proxies /products,
+   /sellers, /recommendations, /events, /health to the backend on :3100 -
+   no CORS setup needed.
+
+9. (Optional) run the backend test suite:
+       cd backend
+       npm test
+
+   Runs directly against Postgres - no running app or mocks required.
+
+================================================================================
+USING THE APP ONCE IT'S UP
+================================================================================
+
+STOREFRONT (http://localhost:5173, default view)
+--------------------------------------------------
+- Open to buyers as "Guest" - no login required.
+- Search, filter by price range/brand/rating, view product details, add to
+  cart, checkout (simulated - fires events, no real orders/payments exist).
+- Personalized recommendations shown above the featured-products grid.
+
+SELLER DASHBOARD (click "Seller Dashboard" in the header)
+-------------------------------------------------------------
+- Demo-only login, gated per brand:
+      Username: the brand name (Nike, Adidas, Puma, Apple, Samsung, Sony,
+                 Levi's, or IKEA - must match a seller from the seed script)
+      Password: Demo@123   (same password for every brand)
+- This is NOT real authentication - it's a lightweight demo gate so you can
+  see how data (products, events) differs per seller. No signup, no real
+  sessions server-side (session lives in the browser's localStorage).
+- Once logged in: manage that seller's products (add/edit/activate/
+  deactivate/bulk actions) and view that seller's User Events feed.
+- "Log out" / "Storefront" link in the sidebar returns to the storefront.
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+- "relation does not exist" / DB errors -> migrations haven't run. Docker:
+  check `docker compose logs migrate`. Local: run `npm run migrate`.
+- Empty storefront / dashboard login rejects every brand -> demo catalog
+  hasn't been seeded yet. Run the seed:demo step for your chosen option.
+- Events/requests failing with "user not found" -> the buyer user seed step
+  (step 4 in Docker / step 5 locally) was skipped.
+- Port already in use (5432/6379/3100/4001/4002/5173) -> something else on
+  your machine is already using it. For Docker, Postgres/Redis are already
+  remapped to 5433/6380 to sidestep this; for the other ports, stop
+  whatever's occupying them or adjust the relevant config.

@@ -1,3 +1,11 @@
+import { CircuitBreaker } from "../../resilience/circuitBreaker";
+
+const breaker = new CircuitBreaker(
+  "search-engine",
+  Number(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD) || 3,
+  Number(process.env.CIRCUIT_BREAKER_COOLDOWN_MS) || 10000
+);
+
 export interface SearchEngineFilters {
   category?: string;
   minPrice?: number;
@@ -53,12 +61,26 @@ export async function callSearchEngine(
   filters: SearchEngineFilters,
   limit: number
 ): Promise<SearchEngineResult> {
+  if (breaker.isOpen()) {
+    console.warn("[circuit-breaker] search-engine: circuit open, skipping network call");
+    throw new Error("search engine circuit breaker is open");
+  }
+
   const url = process.env.SEARCH_ENGINE_URL ?? "http://localhost:4002/search-engine/search";
   const timeoutMs = Number(process.env.SEARCH_ENGINE_TIMEOUT_MS) || 400;
 
   try {
-    return await attempt(url, query, filters, limit, timeoutMs);
+    const result = await attempt(url, query, filters, limit, timeoutMs);
+    breaker.recordSuccess();
+    return result;
   } catch {
-    return await attempt(url, query, filters, limit, timeoutMs);
+    try {
+      const result = await attempt(url, query, filters, limit, timeoutMs);
+      breaker.recordSuccess();
+      return result;
+    } catch (err) {
+      breaker.recordFailure();
+      throw err;
+    }
   }
 }

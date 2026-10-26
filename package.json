@@ -13,7 +13,8 @@
     "dev:mock:search": "ts-node-dev --respawn --transpile-only mock-services/search-engine.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "migrate": "ts-node scripts/migrate.ts"
+    "migrate": "ts-node scripts/migrate.ts",
+    "test": "ts-node tests/inventory-concurrency.test.ts && ts-node tests/events-idempotency.test.ts && ts-node tests/search-fallback.test.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

@@ -1,4 +1,11 @@
+import { CircuitBreaker } from "../../resilience/circuitBreaker";
 import { BlackBoxCandidate } from "./recommendation.types";
+
+const breaker = new CircuitBreaker(
+  "recommendation-engine",
+  Number(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD) || 3,
+  Number(process.env.CIRCUIT_BREAKER_COOLDOWN_MS) || 10000
+);
 
 async function attempt(url: string, userId: string, limit: number, timeoutMs: number): Promise<BlackBoxCandidate[]> {
   const controller = new AbortController();
@@ -29,12 +36,26 @@ async function attempt(url: string, userId: string, limit: number, timeoutMs: nu
  * the retry is thrown to the caller, which is expected to fall back.
  */
 export async function callRecommendationEngine(userId: string, limit: number): Promise<BlackBoxCandidate[]> {
+  if (breaker.isOpen()) {
+    console.warn("[circuit-breaker] recommendation-engine: circuit open, skipping network call");
+    throw new Error("recommendation engine circuit breaker is open");
+  }
+
   const url = process.env.RECOMMENDATION_ENGINE_URL ?? "http://localhost:4001/recommendation-engine/recommend";
   const timeoutMs = Number(process.env.RECOMMENDATION_TIMEOUT_MS) || 400;
 
   try {
-    return await attempt(url, userId, limit, timeoutMs);
+    const result = await attempt(url, userId, limit, timeoutMs);
+    breaker.recordSuccess();
+    return result;
   } catch {
-    return await attempt(url, userId, limit, timeoutMs);
+    try {
+      const result = await attempt(url, userId, limit, timeoutMs);
+      breaker.recordSuccess();
+      return result;
+    } catch (err) {
+      breaker.recordFailure();
+      throw err;
+    }
   }
 }

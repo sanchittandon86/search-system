@@ -70,7 +70,11 @@ function sortClause(sortBy: SearchQuery["sortBy"]): string {
   }
 }
 
-export async function search(query: SearchQuery): Promise<{ results: SearchResultItem[]; total: number }> {
+/**
+ * Phase 2's naive Postgres-only search. Now serves as the fallback path
+ * for when the search black box (Phase 5) is unavailable.
+ */
+export async function naiveSearch(query: SearchQuery): Promise<{ results: SearchResultItem[]; total: number }> {
   const { clause, values } = buildWhereClause(query);
   const offset = (query.page - 1) * query.limit;
 
@@ -97,4 +101,34 @@ export async function search(query: SearchQuery): Promise<{ results: SearchResul
     results: listResult.rows.map(mapRow),
     total: Number(countResult.rows[0].count),
   };
+}
+
+/**
+ * Hydrates black-box candidate IDs against the Product DB, applying the
+ * business filters the black box has no concept of (sellerId ownership,
+ * isActive, in-stock). Order is NOT preserved — callers must re-sort
+ * against their own ranking (the black box's score order, or sortBy).
+ */
+export async function hydrateFiltered(
+  ids: string[],
+  filters: { sellerId?: string; isActive: boolean }
+): Promise<SearchResultItem[]> {
+  if (ids.length === 0) return [];
+
+  const conditions: string[] = ["p.product_id = ANY($1::uuid[])", "p.is_active = $2", "i.quantity > 0"];
+  const values: unknown[] = [ids, filters.isActive];
+
+  if (filters.sellerId) {
+    conditions.push(`p.seller_id = $${values.length + 1}`);
+    values.push(filters.sellerId);
+  }
+
+  const result = await pool.query<SearchRow>(
+    `SELECT p.*, i.quantity
+     FROM products p
+     JOIN inventory i ON i.product_id = p.product_id
+     WHERE ${conditions.join(" AND ")}`,
+    values
+  );
+  return result.rows.map(mapRow);
 }

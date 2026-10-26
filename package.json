@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "dev:mock:recommendation": "ts-node-dev --respawn --transpile-only mock-services/recommendation-engine.ts",
+    "dev:mock:search": "ts-node-dev --respawn --transpile-only mock-services/search-engine.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "migrate": "ts-node scripts/migrate.ts"

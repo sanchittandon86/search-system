@@ -1,6 +1,7 @@
 import { BadRequestError } from "../../errors";
+import * as searchClient from "./search.client";
 import * as searchRepository from "./search.repository";
-import { SearchQuery, SearchResponse, SortBy } from "./search.types";
+import { SearchQuery, SearchResponse, SearchResultItem, SortBy } from "./search.types";
 
 const VALID_SORT_BY: SortBy[] = ["price_asc", "price_desc", "relevance"];
 
@@ -48,7 +49,62 @@ export function parseSearchQuery(raw: Record<string, unknown>): SearchQuery {
   };
 }
 
-export async function search(query: SearchQuery): Promise<SearchResponse> {
-  const { results, total } = await searchRepository.search(query);
+function applySortOverride(results: SearchResultItem[], sortBy: SortBy): SearchResultItem[] {
+  if (sortBy === "price_asc") {
+    return [...results].sort((a, b) => a.price - b.price);
+  }
+  if (sortBy === "price_desc") {
+    return [...results].sort((a, b) => b.price - a.price);
+  }
+  return results; // "relevance" - keep the black box's score order
+}
+
+async function searchViaBlackBox(query: SearchQuery): Promise<SearchResponse> {
+  // Black box only returns a ranked top-K, not arbitrary offset access, so
+  // we overfetch through the requested page and slice locally.
+  const overfetchLimit = query.page * query.limit;
+
+  const blackBoxResult = await searchClient.callSearchEngine(
+    query.q,
+    { category: query.category, minPrice: query.minPrice, maxPrice: query.maxPrice },
+    overfetchLimit
+  );
+
+  const orderedIds = [...blackBoxResult.products].sort((a, b) => b.score - a.score).map((c) => c.productId);
+
+  const hydrated = await searchRepository.hydrateFiltered(orderedIds, {
+    sellerId: query.sellerId,
+    isActive: query.isActive,
+  });
+  const hydratedById = new Map(hydrated.map((p) => [p.productId, p]));
+
+  const ordered = orderedIds
+    .map((id) => hydratedById.get(id))
+    .filter((p): p is SearchResultItem => p !== undefined);
+
+  const sorted = applySortOverride(ordered, query.sortBy);
+  const offset = (query.page - 1) * query.limit;
+  const pageSlice = sorted.slice(offset, offset + query.limit);
+
+  return {
+    results: pageSlice,
+    page: query.page,
+    limit: query.limit,
+    // Approximate: the black box's total reflects its own filters only —
+    // it doesn't know about sellerId/isActive filtering applied above.
+    total: blackBoxResult.total,
+  };
+}
+
+async function searchViaFallback(query: SearchQuery): Promise<SearchResponse> {
+  const { results, total } = await searchRepository.naiveSearch(query);
   return { results, page: query.page, limit: query.limit, total };
+}
+
+export async function search(query: SearchQuery): Promise<SearchResponse> {
+  try {
+    return await searchViaBlackBox(query);
+  } catch {
+    return await searchViaFallback(query);
+  }
 }

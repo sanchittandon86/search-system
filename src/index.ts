@@ -7,6 +7,7 @@ import productRoutes from "./modules/product/product.routes";
 import inventoryRoutes from "./modules/inventory/inventory.routes";
 import searchRoutes from "./modules/search/search.routes";
 import eventRoutes from "./modules/events/event.routes";
+import recommendationRoutes from "./modules/recommendation/recommendation.routes";
 
 const app = express();
 app.use(express.json());
@@ -27,6 +28,7 @@ app.use("/products", searchRoutes);
 app.use("/products", productRoutes);
 app.use("/products", inventoryRoutes);
 app.use("/events", eventRoutes);
+app.use("/recommendations", recommendationRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: "route not found" });
